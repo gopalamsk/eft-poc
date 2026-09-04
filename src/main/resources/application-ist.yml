@@ -1,0 +1,7 @@
+fsl:
+  datasource:
+    pfm:
+      jdbc-url: ${PFM_DB_URL}
+logging:
+  level:
+    com.bns.fsl.rtpeft: INFO

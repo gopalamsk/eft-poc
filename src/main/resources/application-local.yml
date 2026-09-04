@@ -1,0 +1,11 @@
+spring:
+  datasource: {}
+fsl:
+  datasource:
+    pfm:
+      jdbc-url: jdbc:sqlserver://localhost:1433;databaseName=eft_local;encrypt=false
+      username: sa
+      password: LocalDevPassword1
+logging:
+  level:
+    com.bns.fsl.rtpeft: DEBUG

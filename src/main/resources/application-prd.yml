@@ -1,0 +1,9 @@
+fsl:
+  datasource:
+    pfm:
+      jdbc-url: ${PFM_DB_URL}
+      max-pool-size: 20
+      min-idle: 5
+logging:
+  level:
+    com.bns.fsl.rtpeft: WARN

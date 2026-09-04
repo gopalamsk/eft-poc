@@ -1,0 +1,44 @@
+spring:
+  application:
+    name: fsl-rtp-eft-service
+  profiles:
+    active: local
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  batch:
+    job:
+      enabled: false   # we launch the sweep job manually via the scheduler, not on startup
+    jdbc:
+      initialize-schema: never
+
+fsl:
+  kafka:
+    topic:
+      eft-inbound: eft.inbound.topic
+      eft-outbound: eft.outbound.topic
+    consumer:
+      group-id: fsl-rtp-eft-service
+    producer:
+      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+      retries: 3
+      acks: all
+  mq:
+    host: ${MQ_HOST:localhost}
+    port: ${MQ_PORT:1414}
+    channel: ${MQ_CHANNEL:DEV.APP.SVRCONN}
+    queue-manager: ${MQ_QUEUE_MANAGER:QM1}
+    username: ${MQ_USERNAME:}
+    password: ${MQ_PASSWORD:}
+  datasource:
+    pfm:
+      jdbc-url: ${PFM_DB_URL}
+      username: ${PFM_DB_USERNAME}
+      password: ${PFM_DB_PASSWORD}
+      max-pool-size: 10
+      min-idle: 2
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
