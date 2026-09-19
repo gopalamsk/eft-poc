@@ -1,53 +1,53 @@
-package com.bns.fsl.rtpeft.consumer;
+package com.bns.fsl.emt.incoming.event.consumer;
 
-import com.bns.fsl.rtpeft.context.EftTransactionContext;
-import com.bns.fsl.rtpeft.model.EftTransactionPayload;
-import com.bns.fsl.rtpeft.processor.EftTransactionProcessor;
-import com.bns.fsl.rtpeft.util.CommonUtil;
-import com.bns.fsl.rtpeft.util.JsonUtil;
+import com.bns.fsl.emt.incoming.event.aspect.LogExecutionTime;
+import com.bns.fsl.emt.incoming.event.exception.MappingException;
+import com.bns.fsl.emt.incoming.event.processor.MessageConverter;
+import com.bns.fsl.emt.incoming.event.processor.PayhubEventProcessor;
+import com.bns.fsl.emt.incoming.event.util.CommonUtil;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonMappingException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.springframework.kafka.annotation.KafkaListener;
+import org.slf4j.MDC;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
-
-/**
- * Listens on the inbound Kafka topic - one message per EFT transaction
- * (Optimus payment hub splits the batch file before publishing). The Kafka
- * offset is only acknowledged after EftTransactionProcessor has durably
- * written the PENDING row and attempted the ACI publish; a failure before
- * that point simply leaves the offset uncommitted and the message is
- * redelivered on restart - see README "Failure scenarios".
- */
 @Component
-@RequiredArgsConstructor
 @Slf4j
-public class EftInboundKafkaConsumer {
+@RequiredArgsConstructor
+public class PayhubEventKafkaListener implements KafkaListenerInterface {
 
-    private final EftTransactionProcessor eftTransactionProcessor;
-    private final JsonUtil jsonUtil;
+    private static final String MDC_REQUEST_ID = "requestId";
+    private final PayhubEventProcessor payhubEventProcessor;
+    private final MessageConverter messageConverter;
 
-    @KafkaListener(topics = "${fsl.kafka.topic.eft-inbound}", groupId = "${fsl.kafka.consumer.group-id}")
-    public void onMessage(ConsumerRecord<String, String> record, Acknowledgment acknowledgment) {
-        String rawJson = record.value();
+    @Override
+    @LogExecutionTime
+    public void consumePayhubEventListener(ConsumerRecord<String, String> consumerRecord, Acknowledgment acknowledgment) {
+        var payload = consumerRecord.value();
+        if (payload == null || payload.isBlank()) {
+            log.warn("Skipping invalid empty message. Topic: {}", consumerRecord.topic());
+            acknowledgment.acknowledge();
+            return;
+        }
         try {
-            EftTransactionPayload payload = jsonUtil.fromJson(rawJson, EftTransactionPayload.class);
-            String correlationId = CommonUtil.isBlank(payload.getCorrelationId())
-                    ? CommonUtil.generateCorrelationId()
-                    : payload.getCorrelationId();
-
-            EftTransactionContext context = EftTransactionContext.of(correlationId, payload.getFileId(), rawJson);
-            eftTransactionProcessor.process(context, payload);
-
+            var fslIncomingPaymentEventsRequest = messageConverter.jsonToFslIncomingPaymentEventsRequestObject(payload);
+            try ( ) {
+                log.info("Processing Payhub event started.");
+                // Invoke Business Logic
+                payhubEventProcessor.processPayhubEvent(fslIncomingPaymentEventsRequest);
+                log.info("Processing Payhub event completed successfully.");
             acknowledgment.acknowledge();
         } catch (Exception e) {
-            log.error("Failed to process inbound EFT transaction, offset will not be committed, partition={} offset={}",
-                    record.partition(), record.offset(), e);
-            // Deliberately not acknowledging - message is redelivered. A persistently
-            // failing message (bad data ACI can never score) should route to a DLQ
-            // topic rather than block the partition; wire that in via a
-            // DefaultErrorHandler + DeadLetterPublishingRecoverer per README "Poison messages".
+            // ⚠️ RETRYABLE ERROR (DB down, Network, etc.)
+            log.error("Transient error processing Payhub event. Retrying...", e);
+            throw new RuntimeException("Retryable error processing Kafka message", e);
         }
+    } catch (MappingException e) {
+            throw new RuntimeException(e);
+        }
+    }} m
+
     }
 }
