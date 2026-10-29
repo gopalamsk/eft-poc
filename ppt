@@ -1,0 +1,325 @@
+Good morning, everyone.
+
+Today, we’re going to walk through a new initiative to introduce real-time fraud decisioning for SCO 1.0 Electronic Funds Transfer payments, commonly referred to as EFT or account-to-account payments.
+
+Let me start with a little background on this initiative.
+
+Recently, the business has observed an increase in fraudulent activity involving EFT payments. As a result, there is a need to strengthen the existing fraud controls.
+
+Today, we have near real-time fraud monitoring in place for Online EFT payments.
+
+However, the key limitation is that payment processing does not wait for a fraud decision. Payments continue through their normal processing lifecycle while fraud monitoring happens independently.
+
+With this initiative, we’re looking to move from near real-time fraud monitoring to real-time fraud decisioning for Online EFT payments.
+
+This means the payment will now wait for a fraud decision before proceeding, allowing us to take the appropriate action based on whether the decision is Approve, Reject, or Pend.
+
+In terms of scope, we’re introducing two key capabilities.
+
+The first is real-time fraud decisioning for Online EFT payments, covering both single and multiple or group payment submissions.
+
+The second is extending near real-time fraud monitoring to File Upload EFT payments, which is not currently supported.
+
+For File Upload payments, the existing payment processing flow will remain unchanged, meaning payments will not wait for a fraud decision.
+
+So, essentially, we’re introducing real-time fraud decisioning for Online EFT and extending near real-time fraud monitoring to File Upload EFT.
+
+From a solution perspective, we’re proposing a new microservice within the Fraud Service Layer, leveraging our existing ACI Fraud Management platform.
+
+The implementation will be delivered in phases, with the first production release currently targeted for January 18, 2027.
+
+With that background, let’s move to the Current State architecture to understand how EFT fraud monitoring works today and identify the gaps we’re addressing through this initiative.
+
+
+
+
+Yes. I strongly recommend including a short, point-wise explanation of why Kafka was selected over a synchronous API. However, place it in the Target State architecture discussion, not the Overview or Current State slides.
+
+For an Architecture Review Board (ARB), your presentation should follow this sequence:
+
+1. Overview: Why the initiative exists and what business capabilities are being introduced.
+2. Current State Architecture: How EFT fraud monitoring works today and what limitations exist.
+3. Target State Architecture: How the proposed solution works, what changes, and why Kafka was selected over an API.
+
+Since your audience includes senior architects and directors, don’t just describe the boxes and arrows. Explain the architectural decisions and the reasoning behind them.
+
+Below are the meeting notes I recommend for your two architecture slides.
+
+⸻
+
+Slide 2: Logical Architecture (Current State)
+
+Recommended duration: 1.5–2 minutes
+
+Presentation script
+
+Now, moving on to the Current State architecture.
+
+Today, Online EFT payments originate from the SCO channel and are processed through Payment Hub.
+
+Payment Hub sends the EFT payment information to the Fraud Service Layer through an MQ-based integration.
+
+Within FSL, we have an existing service called F-Wires NRT, which receives the payment information and forwards it to ACI Fraud Management for near real-time fraud monitoring.
+
+The service also persists the relevant audit information for monitoring and tracking purposes.
+
+The important point here is that this integration is asynchronous and does not require a fraud decision before payment processing continues.
+
+Payment Hub sends the payment information to FSL without waiting for a response.
+
+So, while ACI performs fraud monitoring, the payment continues through its normal processing lifecycle.
+
+From a fraud capability perspective, we have two limitations today.
+
+First, Online EFT payments are supported only through near real-time fraud monitoring. We don’t have real-time fraud decisioning to control whether a payment should proceed.
+
+Second, File Upload EFT payments currently do not have fraud monitoring coverage.
+
+These are the two gaps we’re addressing through this initiative.
+
+With that understanding, let’s move to the Target State architecture and see how we’re introducing real-time fraud decisioning while reusing our existing fraud management capabilities.
+
+What to emphasize
+
+Don’t spend time explaining every component in the Current State diagram.
+
+Your main message is:
+
+“Today, FSL provides fraud monitoring, but it does not participate in the Online EFT payment authorization decision.”
+
+That is the architectural gap your target solution addresses.
+
+⸻
+
+Slide 3: Logical Architecture (Target State)
+
+Recommended duration: 4–5 minutes
+
+This is your most important slide.
+
+I recommend explaining it in three sections:
+
+1. Online EFT real-time decisioning flow.
+2. Existing ACI integration and fraud decision processing.
+3. Kafka selection and architectural considerations.
+
+Target State: Presentation Script
+
+Now, coming to the proposed Target State architecture.
+
+As part of this initiative, we’re introducing a new microservice within the Fraud Service Layer to support real-time fraud decisioning for Online EFT payments and near real-time monitoring for File Upload EFT payments.
+
+Let me walk through the Online EFT flow first.
+
+Step 1: Payment initiation
+
+The payment originates from the SCO channel and reaches Payment Hub.
+
+Payment Hub will publish the EFT payment request to a dedicated Kafka topic and hold the payment while waiting for a fraud decision.
+
+Step 2: FSL receives the payment
+
+The new EFT microservice subscribes to the Kafka topic and consumes the payment request.
+
+Based on the payment type, the service determines whether real-time fraud decisioning or near real-time monitoring is required.
+
+Step 3: Fraud screening
+
+For Online EFT payments, the microservice transforms the incoming payment information into the format expected by ACI and sends the request through MQ.
+
+Here, we’re reusing our existing ACI Fraud Management integration rather than introducing a separate integration with the vendor.
+
+Step 4: Fraud decision processing
+
+Once ACI completes fraud screening, it publishes the response through the existing MQ integration.
+
+We already have an established fraud decision service that consumes these responses and persists the decisions in our database.
+
+The new EFT microservice will leverage these existing capabilities to retrieve the fraud outcome and correlate it with the original payment request.
+
+Step 5: Decision response to Payment Hub
+
+Once the fraud decision becomes available, FSL will publish the corresponding response to the dedicated EFT response Kafka topic.
+
+Payment Hub will consume this response and take the appropriate action based on whether the decision is Approve, Reject, or Pend.
+
+Step 6: Timeout handling
+
+One important consideration is that the business allows a maximum decision window of 20 minutes.
+
+If a fraud decision is not available within the configured processing window, the solution will apply the agreed timeout handling rules.
+
+For this initiative, the proposed fallback is to auto-approve the payment when the decision timeout is reached.
+
+This ensures that payments do not remain blocked indefinitely while waiting for a fraud response.
+
+Step 7: Near real-time monitoring
+
+In addition to real-time decisioning, we’re extending near real-time monitoring to File Upload EFT payments.
+
+For these payments, the new microservice will initiate fraud monitoring through the existing ACI integration without waiting for a decision.
+
+The payment will continue through its normal processing lifecycle.
+
+Step 8: Audit and monitoring
+
+The new microservice will also publish audit events to the existing FOD audit topic to support fraud monitoring and operational traceability.
+
+So, overall, the solution introduces real-time decisioning for Online EFT payments while extending near real-time monitoring to File Upload EFT payments, leveraging our existing fraud management infrastructure.
+
+Important correction: In Step 4, avoid saying the service directly retrieves decisions whenever they become available if your actual implementation uses scheduled Spring Batch processing.
+
+If the panel asks, explain that a scheduled batch job correlates pending EFT transactions with persisted fraud decisions and publishes the resulting responses. That is an important implementation detail, but you don’t need to introduce it during the initial walkthrough unless the diagram explicitly calls it out.
+
+Also, the auto-approval rule needs explicit business and risk approval. A 20-minute timeout does not, by itself, justify approving an unscored payment.
+
+⸻
+
+Why Kafka Instead of a Synchronous API?
+
+This should be a short architectural justification immediately after the Target State walkthrough.
+
+I recommend presenting four reasons, not a long comparison.
+
+Suggested talking points
+
+One of the key architectural considerations was selecting the integration approach between Payment Hub and FSL.
+
+We evaluated the asynchronous Kafka-based approach against a synchronous API-based integration.
+
+There are a few reasons why we’re proposing Kafka for this initiative.
+
+First, the decision processing window.
+
+The business allows up to 20 minutes for a fraud decision.
+
+Since fraud screening may not complete immediately, we wanted to avoid maintaining long-running synchronous connections between Payment Hub and FSL.
+
+Second, decoupling between systems.
+
+With Kafka, Payment Hub can publish the payment request and continue managing the payment state independently.
+
+FSL can process the fraud request and publish the decision when it becomes available, without requiring Payment Hub to maintain an active connection.
+
+Third, reliability and recovery.
+
+Kafka provides durable event storage and replay capabilities, which can support recovery from temporary service interruptions.
+
+The solution will also incorporate appropriate retry, idempotency, and duplicate-handling controls.
+
+Finally, alignment with the existing integration platform.
+
+Payment Hub and FSL already have Kafka capabilities available, so we’re leveraging the established messaging infrastructure rather than introducing a new integration pattern.
+
+Considering these factors, we believe Kafka is a suitable approach for supporting asynchronous fraud decisioning within the defined business processing window.
+
+Important: Be ready for the API comparison
+
+A senior architect may challenge your justification by saying:
+
+“We could implement the same solution using APIs. Payment Hub calls FSL, receives a request ID, and polls for the decision. Why do we need Kafka?”
+
+That is a valid challenge.
+
+Don’t argue that Kafka is inherently more reliable or scalable than APIs. A well-designed asynchronous API solution can also satisfy these requirements.
+
+Instead, explain the trade-offs.
+
+Consideration	Kafka approach	Asynchronous API approach
+Request submission	Publish payment event	Submit request and receive tracking ID
+Decision retrieval	FSL publishes decision event	Payment Hub polls or receives callback
+Long-running connection	Not required	Not required with async API
+Temporary consumer outage	Events can be retained for later processing	Requires durable request storage and recovery
+Coupling	Event-based integration	API contract and endpoint dependency
+Duplicate handling	Required	Required
+Timeout management	Required	Required
+Operational complexity	Kafka consumers, topics, monitoring	API endpoints, polling/callback, state management
+
+The strongest justification is not simply the 20-minute window.
+
+It is the combination of asynchronous processing, established Kafka infrastructure, and the decision to have FSL publish the fraud outcome rather than require Payment Hub to repeatedly query for it.
+
+⸻
+
+Should you add Kafka considerations to the slide?
+
+Yes, but keep them concise.
+
+Your Target State diagram is already quite detailed. Adding a large comparison table will make it harder to read.
+
+I recommend adding a small box titled:
+
+Key Architecture Considerations
+
+Decision	Rationale
+Kafka-based integration	Supports asynchronous fraud decisioning without long-running connections
+Reuse existing ACI integration	Minimizes changes to established vendor integration
+Dedicated EFT microservice	Separates EFT-specific processing from existing payment services
+Configurable decision timeout	Supports the defined payment decision window and fallback rules
+
+You can explain the API comparison verbally rather than putting it on the slide.
+
+If you have a separate Architecture Decisions slide, place this table there instead.
+
+⸻
+
+Two architectural concerns I would prepare for
+
+1. Why are you polling the database if Kafka is event-driven?
+
+Your design uses Kafka between Payment Hub and FSL, but the fraud response is received through MQ and persisted by an existing fraud decision service.
+
+The new service uses a scheduled batch process to correlate the response with pending EFT transactions.
+
+An architect may question the combination.
+
+Your answer should be:
+
+“The Kafka integration is intended to decouple Payment Hub from FSL. Internally, we’re reusing the existing ACI response-processing capability, which persists fraud decisions in the database. Rather than modifying the shared fraud decision service, we’re introducing EFT-specific decision orchestration to correlate the persisted decision with the original payment request.”
+
+Then acknowledge that event-driven notification from the existing decision service is a possible alternative.
+
+You must be able to explain why scheduled polling was selected over that alternative. Reuse alone is not sufficient if polling creates unnecessary database load or decision latency.
+
+2. How do you prevent duplicate fraud decisions?
+
+Kafka delivery and retries can result in duplicate message processing.
+
+For your design, the critical controls are:
+
+* Correlate the response using the original transaction identifier.
+* Maintain the transaction’s processing status.
+* Ensure a payment receives only one effective fraud outcome.
+* Prevent a late ACI response from overriding an already completed timeout decision.
+* Handle a failure that occurs after publishing to Kafka but before updating the database.
+
+That last scenario deserves particular attention. Publishing a response and updating a database status are not automatically one atomic transaction.
+
+For architecture approval, be prepared to explain your idempotency mechanism and whether you need an outbox or equivalent reliable publishing pattern.
+
+⸻
+
+Recommended presentation timing
+
+Slide	Duration	Focus
+Overview	1.5 minutes	Business problem and initiative scope
+Current State	1.5 minutes	Existing integration and limitations
+Target State	4 minutes	Proposed end-to-end processing
+Architecture considerations	1 minute	Kafka selection, reuse, timeout
+Total	8 minutes	Excluding questions
+
+Final recommendation
+
+Your presentation should establish one clear architectural story:
+
+Current: Payment Hub sends EFT information for fraud monitoring, but processing does not wait for a decision.
+
+Target: Payment Hub holds Online EFT payments, FSL orchestrates fraud screening through ACI, and the decision is returned asynchronously.
+
+Architecture decision: Kafka decouples Payment Hub from fraud processing, while the new EFT microservice reuses existing ACI capabilities.
+
+Business outcome: Fraud decisions can control Online EFT processing before payments proceed.
+
+Keep your spoken walkthrough at this level initially. The database polling, Spring Batch, ShedLock, retry handling, and timeout implementation should be available for the detailed architecture discussion.
+
+One additional point: your diagram currently shows a fairly complex flow involving Kafka, MQ, existing services, and database processing. Directors may reasonably ask why that complexity is necessary. Be ready to explain which components are existing, which are new, and why the design minimizes changes to shared services. That will matter more to the review board than a generic argument that Kafka is better than an API.
